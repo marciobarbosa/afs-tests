@@ -93,7 +93,7 @@ func SetCell(cell Cell, rw int, ro int) {
 	rw_opt = "on"
     }
     if ro == 1 {
-	rw_opt = "on"
+	ro_opt = "on"
     }
 
     cmd := exec.Command("sudo", fs, "setcell", cell.Name, "-hardmount-rw", rw_opt, "-hardmount-ro", ro_opt)
@@ -228,13 +228,15 @@ func SetInterval(interval int) {
     }
 }
 
-func SetState(cell *Cell, interval int, rw int, ro int) {
+func SetState(method int, cell *Cell, interval *int, rw int, ro int) {
     cell.RW = false
     cell.RO = false
 
-    // if interval is 0, we reset the states of the given cell.
-    if interval == 0 {
-	return
+    if *interval == 0 {
+	if method == SYSCTL {
+	    return
+	}
+	*interval = 60
     }
     if rw == 1 {
 	cell.RW = true
@@ -288,39 +290,46 @@ func RunTests(cells []Cell, ncells int, nruns int) {
 	    rw := rand.Intn(2)
 	    ro := rand.Intn(2)
 
+	    SetInterval(interval)
+	    SetCell(cells[cell_i], rw, ro)
+	    SetState(SETCELL, &cells[cell_i], &interval, rw, ro)
+	    EvalStates(cells[cell_i])
+	    if interval == 60 && !cells[cell_i].Primary {
+		// hm_retry_* globals have been reset
+		primary_i := 0
+		cells[primary_i].RW = false
+		cells[primary_i].RO = false
+	    }
+
 	    cname := cells[cell_i].Name
 	    command := fmt.Sprintf("setcell %s rw=%d ro=%d int=%d", cname, rw, ro, interval)
 	    commands = append(commands, command)
-
-	    SetInterval(interval)
-	    SetCell(cells[cell_i], rw, ro)
-	    SetState(&cells[cell_i], interval, rw, ro)
-	    EvalStates(cells[cell_i])
 
 	case SYSCTL:
 	    cell_i := rand.Intn(ncells)
 	    rw := rand.Intn(2)
 	    ro := rand.Intn(2)
 
+	    SetInterval(interval)
+	    SysCtl(cells[cell_i], rw, ro)
+	    SetState(SYSCTL, &cells[cell_i], &interval, rw, ro)
+	    EvalStates(cells[cell_i])
+
 	    cname := cells[cell_i].Name
 	    command := fmt.Sprintf("sysctl %s rw=%d ro=%d int=%d", cname, rw, ro, interval)
 	    commands = append(commands, command)
-
-	    SetInterval(interval)
-	    SysCtl(cells[cell_i], rw, ro)
-	    SetState(&cells[cell_i], interval, rw, ro)
-	    EvalStates(cells[cell_i])
 	}
     }
 
     failed := false
+    SetInterval(1) // so getcell doesn't change the final states
     for _, cell := range cells {
 	cellstate := GetState(cell)
 	cellstates = append(cellstates, cellstate)
 	if cell.RO != cellstate.RO || cell.RW != cellstate.RW {
 	    fmt.Printf("Cell name: %s\n", cell.Name)
-	    fmt.Printf("Expected RO state: %v, Current RO state: %v\n", cell.RO, cellstate.RO)
 	    fmt.Printf("Expected RW state: %v, Current RW state: %v\n", cell.RW, cellstate.RW)
+	    fmt.Printf("Expected RO state: %v, Current RO state: %v\n", cell.RO, cellstate.RO)
 	    fmt.Printf("--------------------------------------------\n\n")
 	    failed = true
 	}
@@ -338,18 +347,18 @@ func RunTests(cells []Cell, ncells int, nruns int) {
 }
 
 func NukeEnv() {
-//    cmd := exec.Command("afsrobot", "teardown")
-//    err := cmd.Run()
-//    if err != nil {
-//	fmt.Println("Error destroying client:", err)
-//	os.Exit(1)
-//    }
-//    cmd = exec.Command("rm", "/tmp/CellServDB")
-//    err = cmd.Run()
-//    if err != nil {
-//	fmt.Println("Error removing CellServDB:", err)
-//	os.Exit(1)
-//    }
+    cmd := exec.Command("afsrobot", "teardown")
+    err := cmd.Run()
+    if err != nil {
+	fmt.Println("Error destroying client:", err)
+	os.Exit(1)
+    }
+    cmd = exec.Command("rm", "/tmp/CellServDB")
+    err = cmd.Run()
+    if err != nil {
+	fmt.Println("Error removing CellServDB:", err)
+	os.Exit(1)
+    }
 }
 
 func main() {
