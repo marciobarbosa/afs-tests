@@ -104,7 +104,7 @@ func SetCell(cell Cell, rw int, ro int) {
     }
 }
 
-func GetCurrentState() (int, int) {
+func GetCurrentState() (int, int, int) {
     cmd := exec.Command("sudo", "sysctl", "afs.hm_retry_RW")
     output, err := cmd.Output()
     if err != nil {
@@ -127,11 +127,22 @@ func GetCurrentState() (int, int) {
     index = strings.Index(sysctl_output, "=")
     ro, _ := strconv.Atoi(strings.TrimSpace(sysctl_output[index+2:]))
 
-    return rw, ro
+    cmd = exec.Command("sudo", "sysctl", "afs.hm_retry_int")
+    output, err = cmd.Output()
+    if err != nil {
+	fmt.Println("Error running sysctl:", err)
+	os.Exit(1)
+    }
+
+    sysctl_output = string(output)
+    index = strings.Index(sysctl_output, "=")
+    interval, _ := strconv.Atoi(strings.TrimSpace(sysctl_output[index+2:]))
+
+    return rw, ro, interval
 }
 
 func SysCtl(cell Cell, rw int, ro int) {
-    cur_rw, cur_ro := GetCurrentState()
+    cur_rw, cur_ro, _ := GetCurrentState()
 
     rw_opt := "afs.hm_retry_RW=0"
     ro_opt := "afs.hm_retry_RO=0"
@@ -236,7 +247,9 @@ func SetState(method int, cell *Cell, interval *int, rw int, ro int) {
 	if method == SYSCTL {
 	    return
 	}
-	*interval = 60
+	if rw != 0 || ro != 0 {
+	    *interval = 60
+	}
     }
     if rw == 1 {
 	cell.RW = true
@@ -315,6 +328,9 @@ func RunTests(cells []Cell, ncells int, nruns int) {
 	    SetState(SYSCTL, &cells[cell_i], &interval, rw, ro)
 	    EvalStates(cells[cell_i])
 
+	    if interval == 0 && cells[cell_i].Primary {
+		SysCtl(cells[cell_i], 0, 0)
+	    }
 	    cname := cells[cell_i].Name
 	    command := fmt.Sprintf("sysctl %s rw=%d ro=%d int=%d", cname, rw, ro, interval)
 	    commands = append(commands, command)
